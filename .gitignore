@@ -1,0 +1,7 @@
+dist/
+staged/
+zeroclaw/
+__pycache__/
+*.pyc
+target/
+*.wasm

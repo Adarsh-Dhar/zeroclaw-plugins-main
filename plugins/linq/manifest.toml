@@ -1,0 +1,17 @@
+name = "linq"
+version = "0.1.0"
+description = "Linq (Partner V3 API: iMessage/RCS/SMS) channel plugin for ZeroClaw: signed webhook ingress + text send over wasi:http."
+author = "JordanTheJet"
+wasm_path = "linq.wasm"
+capabilities = ["channel"]
+# Source-only until ZeroClaw exposes webhook ingress to channel plugins.
+registry = false
+# http_client: outbound calls to the Linq Partner API (TLS is performed host-side).
+# config_read: read this channel's settings + secrets (api_token, from_phone,
+# signing_secret) from its config section.
+permissions = ["http_client", "config_read"]
+# provides: mirror the built-in `linq` channel — read [channels.linq.*] and honor
+# native-wins. The plugin serves inbound over the host webhook route
+# (/plugin/linq) and verifies the X-Webhook-Signature HMAC itself; requires a host
+# with the webhook-ingress capability (zeroclaw#8862).
+provides = "linq"
