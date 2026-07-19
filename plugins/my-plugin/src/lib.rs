@@ -20,7 +20,8 @@ mod component {
     use serde::Deserialize;
 
     use crate::core::{
-        build_transfer, CoreError, Pubkey, RpcClient, TransferArgs, PARAMETERS_SCHEMA,
+        build_transfer, CoreError, Pubkey, RpcClient, TransferArgs, TransferPolicy,
+        PARAMETERS_SCHEMA,
     };
     use exports::zeroclaw::plugin::plugin_info::Guest as PluginInfo;
     use exports::zeroclaw::plugin::tool::{Guest as Tool, ToolResult};
@@ -38,6 +39,7 @@ mod component {
     /// The host injects this plugin's config section as `__config`. Keeping it
     /// in the tool arguments means the component has no ambient config access.
     #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct ExecuteArgs {
         sender: String,
         recipient: String,
@@ -70,6 +72,10 @@ mod component {
                 .filter(|url| !url.trim().is_empty())
                 .cloned()
                 .unwrap_or_else(|| DEFAULT_RPC_URL.to_string())
+        }
+
+        fn policy(&self) -> Result<TransferPolicy, CoreError> {
+            TransferPolicy::from_config(self.config.get("allowed_recipients").map(String::as_str))
         }
     }
 
@@ -112,8 +118,12 @@ mod component {
                 Err(error) => return failure(format!("invalid arguments: {error}")),
             };
 
+            let policy = match parsed.policy() {
+                Ok(policy) => policy,
+                Err(error) => return failure(error.to_string()),
+            };
             let rpc = HostRpcClient::new(parsed.rpc_url());
-            let result = match build_transfer(&parsed.transfer_args(), &rpc) {
+            let result = match build_transfer(&parsed.transfer_args(), &rpc, &policy) {
                 Ok(result) => result,
                 Err(error) => return failure(error.to_string()),
             };

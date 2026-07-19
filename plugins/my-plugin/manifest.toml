@@ -8,3 +8,6 @@ permissions = ["http_client", "config_read"]
 # Override to point at your own RPC (mainnet, devnet, or a private
 # endpoint). Falls back to public devnet if unset — see README.
 rpc_url = "https://api.devnet.solana.com"
+# Comma-separated base58 wallet owners this build-only tool may target. An
+# empty value allows no recipients, so deployment fails closed by default.
+allowed_recipients = ""
