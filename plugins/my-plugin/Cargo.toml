@@ -1,26 +1,34 @@
 [package]
-name = "redact-text"
-version = "0.2.0"
+name = "spl-transfer-build"
+version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
-description = "ZeroClaw WIT plugin: redact secrets and PII from text. Config-driven; the canonical reference tool plugin."
-publish = false
+license = "MIT"
+description = "ZeroClaw tool plugin: builds an unsigned SPL token transfer transaction (T1, no custody)."
 
-# cdylib for the wasm component; rlib so the pure redaction core is testable
-# on the host with a plain `cargo test`.
 [lib]
+name = "spl_transfer_build"
+# cdylib -> compiled as the wasm32-wasip2 component the host loads.
+# rlib   -> lets `cargo test` exercise core.rs on the host with zero wasm toolchain.
 crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
 
 [dependencies]
-wit-bindgen = "0.46"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+bs58 = "0.5"
+sha2 = "0.10"
+base64 = "0.22"
+thiserror = "1"
+# Pure-Rust, no host bindings required -> compiles cleanly to wasm32-wasip2.
+# Used only for the ed25519 off-curve check inside find_program_address.
+curve25519-dalek = { version = "4", default-features = false, features = ["alloc"] }
+
+# Only pulled in for the wasm target. Keep the core dependency-free of these.
+[target.'cfg(target_family = "wasm")'.dependencies]
+wit-bindgen = "0.46"
+waki = "0.4"
 
 [profile.release]
-opt-level = "s"
+opt-level = "z"
 lto = true
 strip = true
-codegen-units = 1
-
-# Standalone crate: built for wasm32-wasip2, not part of the host workspace.
-[workspace]

@@ -1,19 +1,11 @@
-//! A ZeroClaw WIT tool plugin: `redact`.
+//! ZeroClaw's `spl-transfer-build` WIT tool component.
 //!
-//! Scrubs secrets and PII out of text before it reaches a log, a channel, or a
-//! model: email addresses, bearer/API tokens, and any literal patterns the
-//! operator configures. The redaction policy is read from this plugin's own
-//! jailed config section (`config_read` permission), making it the canonical
-//! example of a config-driven tool plugin.
-//!
-//! The pure redaction core lives in [`redact`] with no wasm dependency, so it
-//! compiles and tests on the host with a plain `cargo test`; the wasm component
-//! reuses the exact same logic through this shim.
-//!
-//! Build:  rustup target add wasm32-wasip2
-//!         cargo build --target wasm32-wasip2 --release
+//! The transaction builder itself lives in [`core`], which has no WASM or host
+//! dependencies and is exercised by `cargo test` on the native target. This
+//! file contains the thin component adapter that is compiled only for
+//! `wasm32-wasip2`.
 
-pub mod redact;
+pub mod core;
 
 #[cfg(target_family = "wasm")]
 mod component {
@@ -25,27 +17,63 @@ mod component {
 
     use std::collections::HashMap;
 
-    use crate::redact::{redact, RedactConfig};
+    use serde::Deserialize;
+
+    use crate::core::{
+        build_transfer, CoreError, Pubkey, RpcClient, TransferArgs, PARAMETERS_SCHEMA,
+    };
     use exports::zeroclaw::plugin::plugin_info::Guest as PluginInfo;
     use exports::zeroclaw::plugin::tool::{Guest as Tool, ToolResult};
     use zeroclaw::plugin::logging::{
         log_record, LogLevel, PluginAction, PluginEvent, PluginOutcome,
     };
 
-    struct RedactText;
-
-    const PLUGIN_NAME: &str = "redact-text";
+    const PLUGIN_NAME: &str = "spl-transfer-build";
     const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
-    const TOOL_NAME: &str = "redact";
+    const TOOL_NAME: &str = "spl_transfer_build";
+    const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
 
-    #[derive(serde::Deserialize)]
+    struct SplTransferBuild;
+
+    /// The host injects this plugin's config section as `__config`. Keeping it
+    /// in the tool arguments means the component has no ambient config access.
+    #[derive(Deserialize)]
     struct ExecuteArgs {
-        text: String,
+        sender: String,
+        recipient: String,
+        mint: String,
+        amount: f64,
+        decimals: u8,
+        memo: Option<String>,
+        #[serde(default)]
+        token_2022: bool,
         #[serde(rename = "__config", default)]
         config: HashMap<String, String>,
     }
 
-    impl PluginInfo for RedactText {
+    impl ExecuteArgs {
+        fn transfer_args(&self) -> TransferArgs {
+            TransferArgs {
+                sender: self.sender.clone(),
+                recipient: self.recipient.clone(),
+                mint: self.mint.clone(),
+                amount: self.amount,
+                decimals: self.decimals,
+                memo: self.memo.clone(),
+                token_2022: self.token_2022,
+            }
+        }
+
+        fn rpc_url(&self) -> String {
+            self.config
+                .get("rpc_url")
+                .filter(|url| !url.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| DEFAULT_RPC_URL.to_string())
+        }
+    }
+
+    impl PluginInfo for SplTransferBuild {
         fn plugin_name() -> String {
             PLUGIN_NAME.to_string()
         }
@@ -55,58 +83,53 @@ mod component {
         }
     }
 
-    impl Tool for RedactText {
+    impl Tool for SplTransferBuild {
         fn name() -> String {
             TOOL_NAME.to_string()
         }
 
         fn description() -> String {
-            "Redact secrets and PII from text before it reaches a log, channel, or model. \
-             Masks emails, bearer/API tokens, and any operator-configured literal patterns. \
-             The redaction policy is read from this plugin's own jailed config section."
+            "Build an unsigned SPL token transfer transaction. It derives associated token \
+             accounts, includes idempotent destination-ATA creation, and returns a base64 \
+             transaction and approval-ready summary. This tool never signs or holds keys."
                 .to_string()
         }
 
         fn parameters_schema() -> String {
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "The text to redact."
-                    }
-                },
-                "required": ["text"]
-            })
-            .to_string()
+            PARAMETERS_SCHEMA.to_string()
         }
 
         fn execute(args: String) -> Result<ToolResult, String> {
+            emit(
+                PluginAction::Start,
+                None,
+                "building unsigned SPL transfer",
+                None,
+            );
+
             let parsed: ExecuteArgs = match serde_json::from_str(&args) {
-                Ok(a) => a,
-                Err(e) => {
-                    emit(
-                        PluginAction::Fail,
-                        PluginOutcome::Failure,
-                        "invalid arguments",
-                        None,
-                    );
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some(format!("invalid arguments: {e}")),
-                    });
-                }
+                Ok(parsed) => parsed,
+                Err(error) => return failure(format!("invalid arguments: {error}")),
             };
 
-            let cfg = RedactConfig::from_section(&parsed.config);
-            let (output, count) = redact(&parsed.text, &cfg);
+            let rpc = HostRpcClient::new(parsed.rpc_url());
+            let result = match build_transfer(&parsed.transfer_args(), &rpc) {
+                Ok(result) => result,
+                Err(error) => return failure(error.to_string()),
+            };
+            let output = match serde_json::to_string(&result) {
+                Ok(output) => output,
+                Err(error) => return failure(format!("failed to serialize transfer: {error}")),
+            };
 
             emit(
                 PluginAction::Complete,
-                PluginOutcome::Success,
-                "redacted input",
-                Some(count),
+                Some(PluginOutcome::Success),
+                "built unsigned SPL transfer",
+                Some(format!(
+                    "{{\"destination_ata_will_be_created\":{}}}",
+                    result.destination_ata_will_be_created
+                )),
             );
 
             Ok(ToolResult {
@@ -117,19 +140,36 @@ mod component {
         }
     }
 
+    fn failure(message: String) -> Result<ToolResult, String> {
+        emit(
+            PluginAction::Fail,
+            Some(PluginOutcome::Failure),
+            "failed to build unsigned SPL transfer",
+            Some(format!("{{\"error\":{}}}", json_string(&message))),
+        );
+        Ok(ToolResult {
+            success: false,
+            output: String::new(),
+            error: Some(message),
+        })
+    }
+
+    fn json_string(value: &str) -> String {
+        serde_json::to_string(value).unwrap_or_else(|_| "\"serialization error\"".to_string())
+    }
+
     fn emit(
         action: PluginAction,
-        outcome: PluginOutcome,
+        outcome: Option<PluginOutcome>,
         message: &str,
-        redactions: Option<usize>,
+        attrs: Option<String>,
     ) {
-        let attrs = redactions.map(|n| format!("{{\"redactions\":{n}}}"));
         log_record(
             LogLevel::Info,
             &PluginEvent {
-                function_name: "redact_text::tool::execute".to_string(),
+                function_name: "spl_transfer_build::tool::execute".to_string(),
                 action,
-                outcome: Some(outcome),
+                outcome,
                 duration_ms: None,
                 attrs,
                 message: message.to_string(),
@@ -137,5 +177,75 @@ mod component {
         );
     }
 
-    export!(RedactText);
+    /// RPC adapter implemented with `wasi:http` through `waki`. The core only
+    /// sees this as an `RpcClient`, so tests can supply a local mock instead.
+    struct HostRpcClient {
+        rpc_url: String,
+    }
+
+    impl HostRpcClient {
+        fn new(rpc_url: String) -> Self {
+            Self { rpc_url }
+        }
+
+        fn call(
+            &self,
+            method: &str,
+            params: serde_json::Value,
+        ) -> Result<serde_json::Value, CoreError> {
+            let body = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": method,
+                "params": params,
+            });
+            let response = waki::Client::new()
+                .post(&self.rpc_url)
+                .header("Content-Type", "application/json")
+                .body(body.to_string().into_bytes())
+                .send()
+                .map_err(|error| CoreError::Rpc(format!("HTTP request failed: {error}")))?;
+            let bytes = response
+                .body()
+                .map_err(|error| CoreError::Rpc(format!("failed to read HTTP body: {error}")))?;
+            let value = serde_json::from_slice::<serde_json::Value>(&bytes)
+                .map_err(|error| CoreError::Rpc(format!("invalid JSON-RPC response: {error}")))?;
+            if let Some(error) = value.get("error") {
+                return Err(CoreError::Rpc(format!("RPC returned an error: {error}")));
+            }
+            Ok(value)
+        }
+    }
+
+    impl RpcClient for HostRpcClient {
+        fn get_latest_blockhash(&self) -> Result<[u8; 32], CoreError> {
+            let value = self.call(
+                "getLatestBlockhash",
+                serde_json::json!([{"commitment": "finalized"}]),
+            )?;
+            let blockhash = value
+                .pointer("/result/value/blockhash")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| CoreError::Rpc("missing blockhash in RPC response".to_string()))?;
+            let bytes = bs58::decode(blockhash)
+                .into_vec()
+                .map_err(|_| CoreError::Rpc("blockhash is not valid base58".to_string()))?;
+            bytes
+                .try_into()
+                .map_err(|_| CoreError::Rpc("blockhash is not 32 bytes".to_string()))
+        }
+
+        fn account_exists(&self, pubkey: &Pubkey) -> Result<bool, CoreError> {
+            let value = self.call(
+                "getAccountInfo",
+                serde_json::json!([pubkey.to_base58(), {"encoding": "base64"}]),
+            )?;
+            value
+                .pointer("/result/value")
+                .map(|account| !account.is_null())
+                .ok_or_else(|| CoreError::Rpc("missing account value in RPC response".to_string()))
+        }
+    }
+
+    export!(SplTransferBuild);
 }

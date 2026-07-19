@@ -1,10 +1,10 @@
-name = "redact-text"
-version = "0.2.0"
-description = "Redact secrets and PII from text: emails, bearer/API tokens, and configured patterns"
-author = "ZeroClaw Labs"
-wasm_path = "redact_text.wasm"
+name = "spl-transfer-build"
+version = "0.1.0"
+wasm_path = "target/wasm32-wasip2/release/spl_transfer_build.wasm"
 capabilities = ["tool"]
-# config_read: the host injects this plugin's own config section (replacement,
-# redact_emails, patterns) into execute args as `__config`. Without it the
-# plugin still works with defaults.
-permissions = ["config_read"]
+permissions = ["http_client", "config_read"]
+
+[config]
+# Override to point at your own RPC (mainnet, devnet, or a private
+# endpoint). Falls back to public devnet if unset — see README.
+rpc_url = "https://api.devnet.solana.com"
