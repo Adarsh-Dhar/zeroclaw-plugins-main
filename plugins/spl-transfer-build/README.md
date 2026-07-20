@@ -148,13 +148,18 @@ or events to stdout.
 ## Build and test
 
 ```bash
-cargo test
-cargo build --target wasm32-wasip2 --release
+cargo test --locked
+cargo clippy --all-targets -- -D warnings
+rustup target add wasm32-wasip2
+cargo build --locked --target wasm32-wasip2 --release
+cargo clippy --target wasm32-wasip2 -- -D warnings
+cp target/wasm32-wasip2/release/spl_transfer_build.wasm spl_transfer_build.wasm
 ```
 
-The component is written to
-`target/wasm32-wasip2/release/spl_transfer_build.wasm`, matching
-`manifest.toml`.
+The release build is written to
+`target/wasm32-wasip2/release/spl_transfer_build.wasm`. The last command
+places the installation artifact at `spl_transfer_build.wasm` in the plugin
+root, which is the package-relative path declared in `manifest.toml`.
 
 ## License
 

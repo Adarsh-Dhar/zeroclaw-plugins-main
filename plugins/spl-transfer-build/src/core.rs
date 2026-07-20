@@ -323,12 +323,12 @@ impl CompiledMessage {
     /// Serializes the versioned (v0) message body: version prefix,
     /// header, account keys, blockhash, instructions, empty ALT list.
     pub fn serialize_v0(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.push(0x80); // top bit set = versioned, low 7 bits = version 0
-
-        out.push(self.num_required_signatures);
-        out.push(self.num_readonly_signed);
-        out.push(self.num_readonly_unsigned);
+        let mut out = vec![
+            0x80, // top bit set = versioned, low 7 bits = version 0
+            self.num_required_signatures,
+            self.num_readonly_signed,
+            self.num_readonly_unsigned,
+        ];
 
         encode_compact_u16(self.account_keys.len() as u16, &mut out);
         for k in &self.account_keys {

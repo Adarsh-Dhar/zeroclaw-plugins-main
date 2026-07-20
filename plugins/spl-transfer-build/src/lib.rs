@@ -214,13 +214,11 @@ mod component {
             let response = waki::Client::new()
                 .post(&self.rpc_url)
                 .header("Content-Type", "application/json")
-                .body(body.to_string().into_bytes())
+                .json(&body)
                 .send()
                 .map_err(|error| CoreError::Rpc(format!("HTTP request failed: {error}")))?;
-            let bytes = response
-                .body()
-                .map_err(|error| CoreError::Rpc(format!("failed to read HTTP body: {error}")))?;
-            let value = serde_json::from_slice::<serde_json::Value>(&bytes)
+            let value = response
+                .json::<serde_json::Value>()
                 .map_err(|error| CoreError::Rpc(format!("invalid JSON-RPC response: {error}")))?;
             if let Some(error) = value.get("error") {
                 return Err(CoreError::Rpc(format!("RPC returned an error: {error}")));

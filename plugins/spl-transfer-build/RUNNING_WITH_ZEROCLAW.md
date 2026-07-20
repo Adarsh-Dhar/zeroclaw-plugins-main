@@ -29,7 +29,7 @@ df -h
 From this plugin directory:
 
 ```bash
-cd ~/Documents/zeroclaw-plugins-main/plugins/my-plugin
+cd ~/Documents/zeroclaw-plugins-main/plugins/spl-transfer-build
 
 # Run the deterministic host-side tests.
 cargo test --locked
@@ -39,6 +39,9 @@ rustup target add wasm32-wasip2
 
 # Build the WebAssembly component ZeroClaw loads.
 cargo build --locked --target wasm32-wasip2 --release
+
+# Place the component at the package-root-relative path declared in manifest.toml.
+cp target/wasm32-wasip2/release/spl_transfer_build.wasm spl_transfer_build.wasm
 ```
 
 The component is produced at:
@@ -48,8 +51,8 @@ target/wasm32-wasip2/release/spl_transfer_build.wasm
 ```
 
 This is a WebAssembly plugin artifact, **not** a command to run directly. Do
-not execute the `.wasm` path in your shell; install it through the
-plugin-enabled ZeroClaw binary in step 5.
+not execute the `.wasm` path in your shell; install the package-root
+`spl_transfer_build.wasm` through the plugin-enabled ZeroClaw binary in step 5.
 
 Useful focused tests:
 
@@ -143,7 +146,7 @@ Install the local directory containing `manifest.toml` and the built Wasm file:
 ```bash
 cd ~/Documents/zeroclaw
 ./target/release/zeroclaw plugin install \
-  ~/Documents/zeroclaw-plugins-main/plugins/my-plugin
+  ~/Documents/zeroclaw-plugins-main/plugins/spl-transfer-build
 ```
 
 Verify the installation:
@@ -304,14 +307,15 @@ with the same `--config-dir /path/to/profile` option.
 After changing plugin code:
 
 ```bash
-cd ~/Documents/zeroclaw-plugins-main/plugins/my-plugin
+cd ~/Documents/zeroclaw-plugins-main/plugins/spl-transfer-build
 cargo test --locked
 cargo build --locked --target wasm32-wasip2 --release
+cp target/wasm32-wasip2/release/spl_transfer_build.wasm spl_transfer_build.wasm
 
 cd ~/Documents/zeroclaw
 ./target/release/zeroclaw plugin remove spl-transfer-build
 ./target/release/zeroclaw plugin install \
-  ~/Documents/zeroclaw-plugins-main/plugins/my-plugin
+  ~/Documents/zeroclaw-plugins-main/plugins/spl-transfer-build
 ./target/release/zeroclaw plugin info spl-transfer-build
 ```
 
