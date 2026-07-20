@@ -32,7 +32,9 @@ mod component {
     const PLUGIN_NAME: &str = "spl-transfer-build";
     const PLUGIN_VERSION: &str = env!("CARGO_PKG_VERSION");
     const TOOL_NAME: &str = "spl_transfer_build";
-    const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
+    // Keep an explicit request path. Some WASI HTTP hosts reject an absolute
+    // URL whose path is absent, even though native HTTP clients accept it.
+    const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com/";
 
     struct SplTransferBuild;
 

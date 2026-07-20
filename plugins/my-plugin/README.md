@@ -20,14 +20,17 @@ component cannot read global configuration or another plugin's settings.
 | Key | Required | Default | Purpose |
 | --- | --- | --- | --- |
 | `allowed_recipients` | Yes, to build a transfer | empty (allows nobody) | Comma-separated base58 wallet-owner public keys that may be destinations. |
-| `rpc_url` | No | `https://api.devnet.solana.com` | Solana JSON-RPC endpoint used only to obtain a blockhash and report ATA existence. |
+| `rpc_url` | No | `https://api.devnet.solana.com/` | Solana JSON-RPC endpoint used only to obtain a blockhash and report ATA existence. |
 
 Example configuration:
 
 ```toml
-[plugins.spl-transfer-build]
+[[plugins.entries]]
+name = "spl-transfer-build"
+
+[plugins.entries.config]
 allowed_recipients = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
-rpc_url = "https://api.devnet.solana.com"
+rpc_url = "https://api.devnet.solana.com/"
 ```
 
 An unset or blank `allowed_recipients` value is deliberately **not** an
