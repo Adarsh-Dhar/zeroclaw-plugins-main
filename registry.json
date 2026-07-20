@@ -192,6 +192,17 @@
       "sha256": "331ff0a21e5692f27022c713b900d6923a4fce37b55ef0331d6c32b552e3b4eb"
     },
     {
+      "name": "spl-transfer-build",
+      "version": "0.1.0",
+      "description": "Build an unsigned SPL token transfer transaction for a separately approved wallet workflow.",
+      "author": "Adarsh",
+      "capabilities": [
+        "tool"
+      ],
+      "url": "https://github.com/Adarsh-Dhar/zeroclaw-plugins-main/releases/download/plugins/spl-transfer-build-0.1.0.zip",
+      "sha256": "1f74eb1ae134f25260798003356ab18fa13ebb0e0a8229096975a851597fd076"
+    },
+    {
       "name": "telegram",
       "version": "0.1.0",
       "description": "Telegram channel plugin for ZeroClaw: getUpdates long-poll + sendMessage over wasi:http.",
