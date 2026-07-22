@@ -46,7 +46,7 @@ mod component {
         sender: String,
         recipient: String,
         mint: String,
-        amount: f64,
+        amount: String,
         decimals: u8,
         memo: Option<String>,
         #[serde(default)]
@@ -61,7 +61,7 @@ mod component {
                 sender: self.sender.clone(),
                 recipient: self.recipient.clone(),
                 mint: self.mint.clone(),
-                amount: self.amount,
+                amount: self.amount.clone(),
                 decimals: self.decimals,
                 memo: self.memo.clone(),
                 token_2022: self.token_2022,

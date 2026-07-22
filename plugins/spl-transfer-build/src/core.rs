@@ -385,8 +385,10 @@ pub struct TransferArgs {
     pub sender: String,
     pub recipient: String,
     pub mint: String,
-    /// Human units, e.g. `25.0` for 25 USDC — not raw base units.
-    pub amount: f64,
+    /// Exact human-unit decimal, e.g. `"25.0"` for 25 USDC — not raw base
+    /// units. This deliberately remains text until it is converted with
+    /// checked integer arithmetic; money must never pass through `f64`.
+    pub amount: String,
     pub decimals: u8,
     pub memo: Option<String>,
     #[serde(default)]
@@ -442,11 +444,6 @@ pub fn build_transfer(
     rpc: &dyn RpcClient,
     policy: &TransferPolicy,
 ) -> Result<TransferResult, CoreError> {
-    if !(args.amount.is_finite()) || args.amount <= 0.0 {
-        return Err(CoreError::InvalidInput(
-            "amount must be a positive, finite number".into(),
-        ));
-    }
     if let Some(memo) = &args.memo {
         if memo.len() > MAX_MEMO_LEN {
             return Err(CoreError::InvalidInput(format!(
@@ -470,13 +467,7 @@ pub fn build_transfer(
     let dest_ata = derive_ata(&recipient, &mint, &token_program)?;
     let dest_exists = rpc.account_exists(&dest_ata)?;
 
-    let raw_amount = (args.amount * 10f64.powi(args.decimals as i32)).round();
-    if raw_amount < 0.0 || raw_amount > u64::MAX as f64 {
-        return Err(CoreError::InvalidInput(
-            "amount overflows u64 base units".into(),
-        ));
-    }
-    let raw_amount = raw_amount as u64;
+    let raw_amount = parse_amount_to_base_units(&args.amount, args.decimals)?;
 
     let mut instructions = vec![build_create_ata_idempotent_instruction(
         &sender,
@@ -527,13 +518,74 @@ pub fn build_transfer(
     })
 }
 
+/// Convert a human-readable decimal amount to base units without using binary
+/// floating point. Values with more fractional digits than the mint supports
+/// are rejected rather than rounded into a different transfer amount.
+fn parse_amount_to_base_units(amount: &str, decimals: u8) -> Result<u64, CoreError> {
+    if amount.is_empty() || amount.trim() != amount {
+        return Err(CoreError::InvalidInput(
+            "amount must be a non-empty decimal string without whitespace".into(),
+        ));
+    }
+
+    let mut parts = amount.split('.');
+    let whole = parts.next().expect("split always returns one part");
+    let fraction = parts.next();
+    if parts.next().is_some()
+        || whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.is_some_and(|value| {
+            value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return Err(CoreError::InvalidInput(
+            "amount must be a positive decimal string".into(),
+        ));
+    }
+
+    let fraction = fraction.unwrap_or("");
+    if fraction.len() > decimals as usize {
+        return Err(CoreError::InvalidInput(format!(
+            "amount has more than {decimals} decimal places"
+        )));
+    }
+
+    let scale = 10u64.checked_pow(decimals as u32).ok_or_else(|| {
+        CoreError::InvalidInput("decimals cannot be represented in u64 base units".into())
+    })?;
+    let whole_units = whole
+        .parse::<u64>()
+        .map_err(|_| CoreError::InvalidInput("amount overflows u64 base units".into()))?
+        .checked_mul(scale)
+        .ok_or_else(|| CoreError::InvalidInput("amount overflows u64 base units".into()))?;
+    let fraction_units = if fraction.is_empty() {
+        0
+    } else {
+        let parsed = fraction
+            .parse::<u64>()
+            .map_err(|_| CoreError::InvalidInput("amount overflows u64 base units".into()))?;
+        parsed
+            .checked_mul(10u64.pow((decimals as usize - fraction.len()) as u32))
+            .ok_or_else(|| CoreError::InvalidInput("amount overflows u64 base units".into()))?
+    };
+    let units = whole_units
+        .checked_add(fraction_units)
+        .ok_or_else(|| CoreError::InvalidInput("amount overflows u64 base units".into()))?;
+    if units == 0 {
+        return Err(CoreError::InvalidInput(
+            "amount must be greater than zero base units".into(),
+        ));
+    }
+    Ok(units)
+}
+
 pub const PARAMETERS_SCHEMA: &str = r#"{
   "type": "object",
   "properties": {
     "sender": { "type": "string", "description": "Base58 owner pubkey of the source token account" },
     "recipient": { "type": "string", "description": "Base58 owner pubkey of the destination wallet" },
     "mint": { "type": "string", "description": "Base58 SPL mint address" },
-    "amount": { "type": "number", "exclusiveMinimum": 0, "description": "Human-readable amount, e.g. 25.0" },
+    "amount": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$", "description": "Exact positive human-readable decimal amount, e.g. \\"25.0\\". Must not have more fractional digits than decimals." },
     "decimals": { "type": "integer", "minimum": 0, "maximum": 255, "description": "Mint decimals" },
     "memo": { "type": "string", "maxLength": 500, "description": "Optional invoice/reconciliation memo" },
     "token_2022": { "type": "boolean", "default": false }

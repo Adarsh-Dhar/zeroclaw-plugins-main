@@ -208,7 +208,7 @@ unsigned transaction; it cannot move tokens.
 
 ```bash
 cd ~/Documents/zeroclaw
-./target/release/zeroclaw agent -a adarsh -m 'Use the spl_transfer_build tool exactly once with these arguments and return its output: {"sender":"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU","recipient":"YOUR_DESTINATION_WALLET_OWNER_ADDRESS","mint":"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v","amount":25.0,"decimals":6,"memo":"Plugin smoke test","token_2022":false}. Do not use any other tool.'
+./target/release/zeroclaw agent -a adarsh -m 'Use the spl_transfer_build tool exactly once with these arguments and return its output: {"sender":"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU","recipient":"YOUR_DESTINATION_WALLET_OWNER_ADDRESS","mint":"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v","amount":"25.0","decimals":6,"memo":"Plugin smoke test","token_2022":false}. Do not use any other tool.'
 ```
 
 Because the `adarsh` agent uses supervised mode, ZeroClaw will show a prompt

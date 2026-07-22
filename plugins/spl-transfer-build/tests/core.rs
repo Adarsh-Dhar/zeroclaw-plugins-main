@@ -47,7 +47,7 @@ fn base_args() -> TransferArgs {
         sender: SENDER.into(),
         recipient: RECIPIENT.into(),
         mint: USDC_MINT.into(),
-        amount: 25.0,
+        amount: "25.0".into(),
         decimals: 6,
         memo: Some("Invoice #412".into()),
         token_2022: false,
@@ -91,15 +91,19 @@ fn skips_create_ata_summary_flag_when_dest_exists() {
 }
 
 #[test]
-fn rejects_zero_and_negative_amounts() {
+fn rejects_zero_negative_and_overprecise_amounts() {
     let rpc = MockRpc {
         blockhash: [0u8; 32],
         dest_exists: true,
     };
     let mut args = base_args();
-    args.amount = 0.0;
+    args.amount = "0".into();
     assert!(build_transfer(&args, &rpc, &policy()).is_err());
-    args.amount = -5.0;
+    args.amount = "-5.0".into();
+    assert!(build_transfer(&args, &rpc, &policy()).is_err());
+    args.amount = "0.0000001".into();
+    assert!(build_transfer(&args, &rpc, &policy()).is_err());
+    args.amount = "25.1234567".into();
     assert!(build_transfer(&args, &rpc, &policy()).is_err());
 }
 
@@ -180,7 +184,7 @@ fn malicious_memo_cannot_redirect_or_inflate_transfer() {
 }
 
 fn args_amount_string(args: &TransferArgs) -> String {
-    format!("{}", args.amount)
+    args.amount.clone()
 }
 
 #[test]
