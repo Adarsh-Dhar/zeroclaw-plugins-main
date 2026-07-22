@@ -1,6 +1,7 @@
 //! Host-run integration tests for the pure transaction-building core.
 use spl_transfer_build::core::{
     build_transfer, CoreError, Pubkey, RpcClient, TransferArgs, TransferPolicy, MAX_MEMO_LEN,
+    PARAMETERS_SCHEMA,
 };
 
 struct MockRpc {
@@ -52,6 +53,19 @@ fn base_args() -> TransferArgs {
         memo: Some("Invoice #412".into()),
         token_2022: false,
     }
+}
+
+#[test]
+fn parameters_schema_is_valid_json_for_the_host() {
+    let value: serde_json::Value = serde_json::from_str(PARAMETERS_SCHEMA)
+        .expect("parameters schema must be valid JSON for ZeroClaw registration");
+
+    assert_eq!(
+        value
+            .pointer("/properties/amount/type")
+            .and_then(|v| v.as_str()),
+        Some("string")
+    );
 }
 
 #[test]

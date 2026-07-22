@@ -585,7 +585,7 @@ pub const PARAMETERS_SCHEMA: &str = r#"{
     "sender": { "type": "string", "description": "Base58 owner pubkey of the source token account" },
     "recipient": { "type": "string", "description": "Base58 owner pubkey of the destination wallet" },
     "mint": { "type": "string", "description": "Base58 SPL mint address" },
-    "amount": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$", "description": "Exact positive human-readable decimal amount, e.g. \\"25.0\\". Must not have more fractional digits than decimals." },
+    "amount": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$", "description": "Exact positive human-readable decimal amount, e.g. \"25.0\". Must not have more fractional digits than decimals." },
     "decimals": { "type": "integer", "minimum": 0, "maximum": 255, "description": "Mint decimals" },
     "memo": { "type": "string", "maxLength": 500, "description": "Optional invoice/reconciliation memo" },
     "token_2022": { "type": "boolean", "default": false }
