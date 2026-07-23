@@ -5,6 +5,10 @@
 //! and approve the transfer.
 
 use serde::{Deserialize, Serialize};
+use solana_core_wasi::{
+    pay::TransferRequest,
+    pubkey::Pubkey,
+};
 
 pub const PARAMETERS_SCHEMA: &str = r#"{
   "type": "object",
@@ -61,15 +65,15 @@ pub fn build_solana_pay_request(args: &PayRequestArgs) -> Result<PayRequestResul
         }
     }
 
-    let mut query = vec![
-        format!("amount={}", args.amount),
-        format!("spl-token={}", args.mint),
-        format!("reference={}", args.reference),
-    ];
-    if let Some(memo) = &args.memo {
-        query.push(format!("memo={}", percent_encode(memo)));
+    let solana_pay_url = TransferRequest {
+        recipient: args.recipient.clone(),
+        amount: Some(args.amount.clone()),
+        spl_token: Some(args.mint.clone()),
+        references: vec![args.reference.clone()],
+        memo: args.memo.clone(),
+        ..Default::default()
     }
-    let solana_pay_url = format!("solana:{}?{}", args.recipient, query.join("&"));
+    .to_url();
     let summary = format!(
         "Request {} tokens to {}\nMint: {}\nReference: {}\nMemo: {}\nRequires wallet approval; this plugin cannot sign or submit.",
         args.amount,
@@ -87,11 +91,7 @@ pub fn build_solana_pay_request(args: &PayRequestArgs) -> Result<PayRequestResul
 }
 
 fn validate_pubkey(value: &str, field: &'static str) -> Result<(), PayError> {
-    let bytes = bs58::decode(value).into_vec().ok();
-    if !matches!(bytes, Some(ref value) if value.len() == 32) {
-        return Err(PayError::InvalidPubkey { field });
-    }
-    Ok(())
+    Pubkey::parse(value).map(|_| ()).map_err(|_| PayError::InvalidPubkey { field })
 }
 
 fn validate_amount(value: &str) -> Result<(), PayError> {
@@ -116,15 +116,3 @@ fn validate_amount(value: &str) -> Result<(), PayError> {
     Ok(())
 }
 
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .flat_map(|byte| {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-                vec![byte as char].into_iter().collect::<Vec<_>>()
-            } else {
-                format!("%{byte:02X}").chars().collect::<Vec<_>>()
-            }
-        })
-        .collect()
-}

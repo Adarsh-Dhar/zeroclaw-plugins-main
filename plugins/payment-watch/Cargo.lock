@@ -340,11 +340,9 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 name = "payment-watch"
 version = "0.1.0"
 dependencies = [
- "bs58",
- "curve25519-dalek",
  "serde",
  "serde_json",
- "sha2",
+ "solana-core-wasi",
  "thiserror",
  "waki",
  "wit-bindgen 0.46.0",
@@ -470,6 +468,17 @@ name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+
+[[package]]
+name = "solana-core-wasi"
+version = "0.1.0"
+dependencies = [
+ "bs58",
+ "curve25519-dalek",
+ "serde",
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "spdx"

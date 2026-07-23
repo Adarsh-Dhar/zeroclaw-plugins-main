@@ -4,14 +4,17 @@
 //! structured `payment-received` event only when an observed transaction
 //! matches every expected value; otherwise it returns `waiting`.
 
-use curve25519_dalek::edwards::CompressedEdwardsY;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::fmt;
+use solana_core_wasi::{
+    amount::to_base_units,
+    pubkey::{derive_ata as core_derive_ata, PubkeyError},
+};
+
+// Re-export Pubkey for test compatibility
+pub use solana_core_wasi::pubkey::Pubkey;
 
 pub const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 pub const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
-pub const ATA_PROGRAM_ID: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 
 pub const PARAMETERS_SCHEMA: &str = r#"{
   "type": "object",
@@ -35,57 +38,16 @@ pub enum WatchError {
     InvalidInput(String),
     #[error("rpc error: {0}")]
     Rpc(String),
-    #[error("PDA derivation failed")]
-    PdaNotFound,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Pubkey(pub [u8; 32]);
-
-impl Pubkey {
-    pub fn from_base58(value: &str) -> Result<Self, WatchError> {
-        let bytes = bs58::decode(value)
-            .into_vec()
-            .map_err(|_| WatchError::InvalidPubkey)?;
-        let bytes: [u8; 32] = bytes.try_into().map_err(|_| WatchError::InvalidPubkey)?;
-        Ok(Self(bytes))
-    }
-
-    pub fn to_base58(self) -> String {
-        bs58::encode(self.0).into_string()
-    }
-
-    fn find_program_address(seeds: &[&[u8]], program_id: &Self) -> Result<Self, WatchError> {
-        for bump in (0u8..=255).rev() {
-            let mut hasher = Sha256::new();
-            for seed in seeds {
-                hasher.update(seed);
-            }
-            hasher.update([bump]);
-            hasher.update(program_id.0);
-            hasher.update(b"ProgramDerivedAddress");
-            let hash: [u8; 32] = hasher.finalize().into();
-            if CompressedEdwardsY(hash).decompress().is_none() {
-                return Ok(Self(hash));
-            }
-        }
-        Err(WatchError::PdaNotFound)
+impl From<PubkeyError> for WatchError {
+    fn from(_: PubkeyError) -> Self {
+        WatchError::InvalidPubkey
     }
 }
 
-impl fmt::Display for Pubkey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.to_base58())
-    }
-}
-
-pub fn derive_ata(
-    owner: Pubkey,
-    mint: Pubkey,
-    token_program: Pubkey,
-) -> Result<Pubkey, WatchError> {
-    let ata_program = Pubkey::from_base58(ATA_PROGRAM_ID)?;
-    Pubkey::find_program_address(&[&owner.0, &token_program.0, &mint.0], &ata_program)
+pub fn derive_ata(owner: Pubkey, mint: Pubkey, _token_program: Pubkey) -> Result<Pubkey, WatchError> {
+    Ok(core_derive_ata(&owner, &mint))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,10 +79,10 @@ impl PaymentWatchArgs {
                 "decimals must be at most 19".into(),
             ));
         }
-        let recipient = Pubkey::from_base58(&self.recipient)?;
-        let mint = Pubkey::from_base58(&self.mint)?;
-        let reference = Pubkey::from_base58(&self.reference)?;
-        let token_program = Pubkey::from_base58(if self.token_2022 {
+        let recipient = Pubkey::parse(&self.recipient)?;
+        let mint = Pubkey::parse(&self.mint)?;
+        let reference = Pubkey::parse(&self.reference)?;
+        let token_program = Pubkey::parse(if self.token_2022 {
             TOKEN_2022_PROGRAM_ID
         } else {
             TOKEN_PROGRAM_ID
@@ -129,64 +91,14 @@ impl PaymentWatchArgs {
             recipient,
             mint,
             reference,
-            amount_base_units: parse_amount_to_base_units(&self.amount, self.decimals)?,
+            amount_base_units: to_base_units(&self.amount, self.decimals)
+                .map_err(|e| WatchError::InvalidInput(e.to_string()))?,
             decimals: self.decimals,
             token_program,
         })
     }
 }
 
-fn parse_amount_to_base_units(amount: &str, decimals: u8) -> Result<u64, WatchError> {
-    if amount.is_empty() || amount.trim() != amount {
-        return Err(WatchError::InvalidInput(
-            "amount must be a non-empty decimal string without whitespace".into(),
-        ));
-    }
-    let mut parts = amount.split('.');
-    let whole = parts.next().expect("split returns one element");
-    let fraction = parts.next();
-    if parts.next().is_some()
-        || whole.is_empty()
-        || !whole.bytes().all(|b| b.is_ascii_digit())
-        || fraction.is_some_and(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
-    {
-        return Err(WatchError::InvalidInput(
-            "amount must be a positive decimal string".into(),
-        ));
-    }
-    let fraction = fraction.unwrap_or("");
-    if fraction.len() > decimals as usize {
-        return Err(WatchError::InvalidInput(format!(
-            "amount has more than {decimals} decimal places"
-        )));
-    }
-    let scale = 10u64
-        .checked_pow(decimals as u32)
-        .ok_or_else(|| WatchError::InvalidInput("amount overflows u64 base units".into()))?;
-    let whole_units = whole
-        .parse::<u64>()
-        .map_err(|_| WatchError::InvalidInput("amount overflows u64 base units".into()))?
-        .checked_mul(scale)
-        .ok_or_else(|| WatchError::InvalidInput("amount overflows u64 base units".into()))?;
-    let fraction_units = if fraction.is_empty() {
-        0
-    } else {
-        fraction
-            .parse::<u64>()
-            .map_err(|_| WatchError::InvalidInput("amount overflows u64 base units".into()))?
-            .checked_mul(10u64.pow((decimals as usize - fraction.len()) as u32))
-            .ok_or_else(|| WatchError::InvalidInput("amount overflows u64 base units".into()))?
-    };
-    let amount = whole_units
-        .checked_add(fraction_units)
-        .ok_or_else(|| WatchError::InvalidInput("amount overflows u64 base units".into()))?;
-    if amount == 0 {
-        return Err(WatchError::InvalidInput(
-            "amount must be greater than zero base units".into(),
-        ));
-    }
-    Ok(amount)
-}
 
 #[derive(Debug, Clone)]
 pub struct ObservedPayment {

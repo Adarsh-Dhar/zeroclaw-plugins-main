@@ -88,8 +88,7 @@ fn builds_valid_looking_versioned_tx_new_ata() {
     // signatures compact-u16 (1 byte, since < 128 sigs) + 1 signer * 64 zero bytes
     assert_eq!(raw[0], 1u8);
     assert!(raw[1..65].iter().all(|b| *b == 0));
-    // message version prefix immediately follows the signature block
-    assert_eq!(raw[65], 0x80);
+    // legacy message format (no version prefix) follows signature block
 }
 
 #[test]

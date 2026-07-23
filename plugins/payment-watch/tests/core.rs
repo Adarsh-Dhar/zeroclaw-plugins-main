@@ -24,8 +24,8 @@ fn payment(reference_present: bool) -> ObservedPayment {
     ObservedPayment {
         signature: "test-signature".into(),
         sender: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU".into(),
-        recipient: Pubkey::from_base58(RECIPIENT).unwrap(),
-        mint: Pubkey::from_base58(MINT).unwrap(),
+        recipient: Pubkey::parse(RECIPIENT).unwrap(),
+        mint: Pubkey::parse(MINT).unwrap(),
         amount_base_units: 25_000_000,
         decimals: 6,
         reference_present,
