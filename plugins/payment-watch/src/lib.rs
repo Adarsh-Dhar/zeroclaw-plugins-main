@@ -280,8 +280,8 @@ mod component {
                     }
                 })
                 .unwrap_or_else(|| "unknown".into());
-            let recipient = Pubkey::from_base58(balance.get("owner")?.as_str()?).ok()?;
-            let mint = Pubkey::from_base58(balance.get("mint")?.as_str()?).ok()?;
+            let recipient = Pubkey::parse(balance.get("owner")?.as_str()?).ok()?;
+            let mint = Pubkey::parse(balance.get("mint")?.as_str()?).ok()?;
             let _ = key_at(index);
             return Some(ObservedPayment {
                 signature: signature.into(),
