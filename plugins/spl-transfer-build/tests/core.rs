@@ -1,7 +1,7 @@
 //! Host-run integration tests for the pure transaction-building core.
 use spl_transfer_build::core::{
-    build_transfer, CoreError, Pubkey, RpcClient, TransferArgs, TransferPolicy, MAX_MEMO_LEN,
-    PARAMETERS_SCHEMA,
+    build_transfer, CoreError, PolicyVerdict, Pubkey, RpcClient, TransferArgs, TransferPolicy,
+    MAX_MEMO_LEN, PARAMETERS_SCHEMA,
 };
 
 struct MockRpc {
@@ -73,7 +73,14 @@ const ATTACKER: &str = "11111111111111111111111111111111";
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 fn policy() -> TransferPolicy {
-    TransferPolicy::from_config(Some(RECIPIENT)).expect("valid test allowlist")
+    TransferPolicy::from_config(Some(RECIPIENT), None).expect("valid test allowlist")
+}
+
+/// Same allowlist as `policy()`, but with an auto-approve cap in base
+/// units, for exercising the approval-gating path.
+fn policy_with_cap(cap_base_units: u64) -> TransferPolicy {
+    TransferPolicy::from_config(Some(RECIPIENT), Some(&cap_base_units.to_string()))
+        .expect("valid test allowlist with cap")
 }
 
 fn base_args() -> TransferArgs {
@@ -475,4 +482,87 @@ fn self_transfer_is_rejected() {
     args.sender = RECIPIENT.into(); // Same as recipient
     let result = build_transfer(&args, &rpc, &policy());
     assert!(matches!(result, Err(CoreError::InvalidInput(_))));
+}
+
+// --- Approval-gating (spending cap) ---------------------------------------
+//
+// `base_args()` transfers "25.0" at 6 decimals == 25_000_000 base units.
+
+#[test]
+fn under_cap_stays_auto_approved() {
+    let rpc = MockRpc {
+        blockhash: [5u8; 32],
+        dest_exists: false,
+        nonce_data: None,
+        mint_data: None,
+    };
+    let result = build_transfer(&base_args(), &rpc, &policy_with_cap(50_000_000))
+        .expect("under the cap, no nonce required");
+    assert_eq!(result.status, "auto_approved");
+    assert_eq!(result.policy_verdict, PolicyVerdict::AutoApproved);
+}
+
+#[test]
+fn over_cap_without_nonce_account_is_rejected() {
+    let rpc = MockRpc {
+        blockhash: [5u8; 32],
+        dest_exists: false,
+        nonce_data: None,
+        mint_data: None,
+    };
+    // Cap is under the 25_000_000 base-unit transfer amount, and no
+    // nonce_account is supplied — this must fail rather than silently
+    // building a recent-blockhash transaction that would expire before
+    // anyone gets a chance to approve it.
+    let result = build_transfer(&base_args(), &rpc, &policy_with_cap(1));
+    assert!(matches!(result, Err(CoreError::ApprovalRequiresNonce)));
+}
+
+#[test]
+fn over_cap_with_nonce_account_requires_approval() {
+    let mut nonce_data = vec![0u8; 80];
+    nonce_data[0..4].copy_from_slice(&1u32.to_le_bytes());
+    nonce_data[4..8].copy_from_slice(&1u32.to_le_bytes());
+    nonce_data[8..40].copy_from_slice(&[7u8; 32]);
+    nonce_data[40..72].copy_from_slice(&[9u8; 32]);
+    nonce_data[72..80].copy_from_slice(&5000u64.to_le_bytes());
+
+    let rpc = MockRpc {
+        blockhash: [1u8; 32],
+        dest_exists: false,
+        nonce_data: Some(nonce_data),
+        mint_data: None,
+    };
+
+    let mut args = base_args();
+    args.nonce_account = Some("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU".to_string());
+
+    let result = build_transfer(&args, &rpc, &policy_with_cap(1))
+        .expect("over the cap but with a nonce, so it should build as pending approval");
+    assert_eq!(result.status, "requires_approval");
+    assert_eq!(
+        result.policy_verdict,
+        PolicyVerdict::RequiresApproval { cap_base_units: 1 }
+    );
+    assert!(
+        result.summary.contains("requires_approval"),
+        "the human-readable summary should call out that this needs approval, not just the structured field"
+    );
+}
+
+#[test]
+fn evaluate_denies_recipients_outside_the_allowlist() {
+    let verdict = policy().evaluate(ATTACKER, 1);
+    assert_eq!(
+        verdict,
+        PolicyVerdict::Denied {
+            reason: "recipient is not approved".to_string()
+        }
+    );
+}
+
+#[test]
+fn invalid_auto_approve_cap_config_is_rejected() {
+    let result = TransferPolicy::from_config(Some(RECIPIENT), Some("not-a-number"));
+    assert!(matches!(result, Err(CoreError::InvalidAutoApproveCap)));
 }

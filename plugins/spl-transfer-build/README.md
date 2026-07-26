@@ -21,6 +21,7 @@ component cannot read global configuration or another plugin's settings.
 | --- | --- | --- | --- |
 | `allowed_recipients` | Yes, to build a transfer | empty (allows nobody) | Comma-separated base58 wallet-owner public keys that may be destinations. |
 | `rpc_url` | No | `https://api.devnet.solana.com/` | Solana JSON-RPC endpoint used only to obtain a blockhash and report ATA existence. |
+| `max_auto_approve_base_units` | No | unset (no cap) | Spending cap in the mint's raw base units. At/under: built normally (`status: "auto_approved"`). Over: still built, but against a durable nonce and marked `status: "requires_approval"` instead of ready-to-sign — see "Approval gating" below. |
 
 Example configuration:
 
@@ -78,13 +79,39 @@ The successful result has this shape:
   "summary": "Transfer 25 tokens (25000000 base units)\\nFrom: ...\\nTo: ...\\nRequires signature from: ...",
   "source_ata": "<derived ATA>",
   "destination_ata": "<derived ATA>",
-  "destination_ata_will_be_created": true
+  "destination_ata_will_be_created": true,
+  "status": "auto_approved",
+  "policy_verdict": { "verdict": "auto_approved" }
 }
 ```
 
 The transaction has an empty signature slot and must be independently
 approved and signed. A different recent blockhash changes the base64 output,
 so the example intentionally does not present it as a fixed value.
+
+## Approval gating
+
+Set `max_auto_approve_base_units` to require a second look on large
+transfers, without giving up the durable-nonce reliability work this plugin
+already does for other transfers:
+
+- **At or under the cap:** unchanged from before this option existed —
+  built against a recent blockhash, `status: "auto_approved"`.
+- **Over the cap:** the request must also include `nonce_account` (a
+  pre-created, unadvanced durable-nonce account). The transaction is built
+  immediately — so it's ready the moment someone approves it — but against
+  the durable nonce instead of a recent blockhash, and comes back
+  `status: "requires_approval"` with `policy_verdict.cap_base_units` set.
+  Omitting `nonce_account` for an over-cap transfer is rejected outright: a
+  recent-blockhash transaction would simply expire before an out-of-band
+  approver ever saw it, so the tool refuses to build one.
+- The status is included both in the returned JSON and in this plugin's
+  structured log record (`log_record`'s `attrs`), so an operator can audit
+  which transfers were auto-approved versus held for approval, and why.
+
+This cap is a config-level policy knob, not a tool argument — like
+`allowed_recipients`, an agent calling this tool cannot raise its own
+spending limit.
 
 ## Threat model and fail-closed behavior
 

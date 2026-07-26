@@ -15,3 +15,13 @@ rpc_url = "https://api.devnet.solana.com/"
 # Comma-separated base58 wallet owners this build-only tool may target. An
 # empty value allows no recipients, so deployment fails closed by default.
 allowed_recipients = ""
+# Optional spending cap, in the mint's raw base units (not human-readable
+# amount — a mint's `decimals` varies, so base units are the only
+# unambiguous unit here). Transfers at or under this cap are built as
+# `status: "auto_approved"` against a recent blockhash, same as before this
+# option existed. Transfers over the cap are still built — but against a
+# durable nonce, and marked `status: "requires_approval"` — so a human or a
+# second agent can review before it's ever signed, without the transaction
+# expiring while it waits. Leave unset (default) to auto-approve any amount
+# to an allowlisted recipient, matching the tool's original behavior.
+max_auto_approve_base_units = ""

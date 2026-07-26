@@ -44,6 +44,13 @@ pub enum CoreError {
     InvalidInput(String),
     #[error("unsafe mint extension: {0}")]
     UnsafeMintExtension(String),
+    #[error("max_auto_approve_base_units must be a non-negative integer")]
+    InvalidAutoApproveCap,
+    #[error(
+        "amount exceeds the auto-approve cap and requires a durable nonce_account so the \
+         built transaction can wait for out-of-band approval instead of expiring"
+    )]
+    ApprovalRequiresNonce,
 }
 
 impl From<PubkeyError> for CoreError {
@@ -111,18 +118,47 @@ pub struct TransferArgs {
     pub nonce_account: Option<String>,
 }
 
+/// Result of policy evaluation, surfaced to the caller and to structured
+/// logs so an operator can audit *why* a transfer was or wasn't built
+/// straight to a ready-to-sign transaction — not just that it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "verdict", rename_all = "snake_case")]
+pub enum PolicyVerdict {
+    /// Recipient is allowlisted and the amount is at or under the
+    /// configured auto-approve cap (or no cap is configured).
+    AutoApproved,
+    /// Recipient is allowlisted but the amount exceeds the configured
+    /// auto-approve cap. The transaction is still built (so it's ready the
+    /// moment it's approved) but against a durable nonce rather than a
+    /// recent blockhash, and callers must treat it as unsigned-and-pending
+    /// rather than ready.
+    RequiresApproval { cap_base_units: u64 },
+    /// Recipient is not on the allowlist. No transaction is built.
+    Denied { reason: String },
+}
+
 /// Operator-controlled destination policy. An empty allowlist intentionally
 /// authorizes nobody: a transfer tool should fail closed until its owner names
 /// the wallet owners it may build transactions for.
 #[derive(Debug, Clone)]
 pub struct TransferPolicy {
     allowed_recipients: Vec<Pubkey>,
+    /// Above this many base units, a transfer is still built (as a durable-
+    /// nonce transaction) but comes back `requires_approval` instead of
+    /// ready-to-sign. `None` means no cap: any allowlisted recipient is
+    /// auto-approved regardless of amount, matching the tool's original
+    /// (pre-approval-rail) behavior.
+    max_auto_approve_base_units: Option<u64>,
 }
 
 impl TransferPolicy {
-    /// Parse the comma-separated `allowed_recipients` config value. Missing or
-    /// blank configuration produces an empty allowlist, never an allow-all.
-    pub fn from_config(configured_recipients: Option<&str>) -> Result<Self, CoreError> {
+    /// Parse the comma-separated `allowed_recipients` config value plus the
+    /// optional `max_auto_approve_base_units` cap. Missing or blank
+    /// configuration produces an empty allowlist, never an allow-all.
+    pub fn from_config(
+        configured_recipients: Option<&str>,
+        max_auto_approve_base_units: Option<&str>,
+    ) -> Result<Self, CoreError> {
         let allowed_recipients = configured_recipients
             .unwrap_or_default()
             .split(',')
@@ -131,17 +167,54 @@ impl TransferPolicy {
             .map(Pubkey::parse)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| CoreError::InvalidRecipientPolicy)?;
-        Ok(Self { allowed_recipients })
+
+        let max_auto_approve_base_units = match max_auto_approve_base_units.map(str::trim) {
+            None | Some("") => None,
+            Some(raw) => Some(
+                raw.parse::<u64>()
+                    .map_err(|_| CoreError::InvalidAutoApproveCap)?,
+            ),
+        };
+
+        Ok(Self {
+            allowed_recipients,
+            max_auto_approve_base_units,
+        })
     }
 
     /// Validate a requested destination before any RPC request or transaction
     /// serialization. A valid but unapproved public key is rejected too.
+    /// Kept alongside `evaluate` because a bad recipient should fail before
+    /// any amount is even parsed.
     pub fn authorize_recipient(&self, recipient: &str) -> Result<(), CoreError> {
         let recipient = Pubkey::parse(recipient)?;
         if self.allowed_recipients.contains(&recipient) {
             Ok(())
         } else {
             Err(CoreError::RecipientNotApproved)
+        }
+    }
+
+    /// Full policy verdict for an already-approved recipient and a known
+    /// amount in base units. Call `authorize_recipient` (or check the
+    /// `Denied` arm here) first — this only decides auto-approve vs.
+    /// requires-approval once the recipient itself is known to be allowed.
+    pub fn evaluate(&self, recipient: &str, amount_base_units: u64) -> PolicyVerdict {
+        let Ok(recipient) = Pubkey::parse(recipient) else {
+            return PolicyVerdict::Denied {
+                reason: "invalid recipient public key".to_string(),
+            };
+        };
+        if !self.allowed_recipients.contains(&recipient) {
+            return PolicyVerdict::Denied {
+                reason: "recipient is not approved".to_string(),
+            };
+        }
+        match self.max_auto_approve_base_units {
+            Some(cap) if amount_base_units > cap => {
+                PolicyVerdict::RequiresApproval { cap_base_units: cap }
+            }
+            _ => PolicyVerdict::AutoApproved,
         }
     }
 }
@@ -153,6 +226,11 @@ pub struct TransferResult {
     pub source_ata: String,
     pub destination_ata: String,
     pub destination_ata_will_be_created: bool,
+    /// `"auto_approved"` or `"requires_approval"` — mirrors `policy_verdict` 
+    /// as a plain string so callers that only look at `status` (e.g. a log
+    /// filter) don't need to parse the nested verdict shape.
+    pub status: String,
+    pub policy_verdict: PolicyVerdict,
 }
 
 pub fn build_transfer(
@@ -205,6 +283,17 @@ pub fn build_transfer(
     let raw_amount = to_base_units(&args.amount, args.decimals)
         .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
 
+    // The recipient was already fail-closed-checked above; this second look
+    // decides auto-approve vs. requires-approval now that we know the
+    // amount. A transfer over the cap is still built — as a durable-nonce
+    // transaction so it can sit unsigned until someone approves it — rather
+    // than rejected outright.
+    let policy_verdict = policy.evaluate(&args.recipient, raw_amount);
+    if matches!(policy_verdict, PolicyVerdict::RequiresApproval { .. }) && args.nonce_account.is_none()
+    {
+        return Err(CoreError::ApprovalRequiresNonce);
+    }
+
     let mut instructions = vec![ata_create_idempotent(
         &sender,
         &dest_ata,
@@ -239,13 +328,26 @@ pub fn build_transfer(
     let message = compile_legacy(&sender, &instructions, &recent_blockhash);
     let transaction_base64 = unsigned_transaction_base64(&message);
 
+    let status = match policy_verdict {
+        PolicyVerdict::RequiresApproval { .. } => "requires_approval",
+        _ => "auto_approved",
+    };
+    let approval_note = match &policy_verdict {
+        PolicyVerdict::RequiresApproval { cap_base_units } => format!(
+            "\nStatus: requires_approval — {raw_amount} base units exceeds the \
+             {cap_base_units} auto-approve cap; built against a durable nonce so it \
+             can wait to be approved without expiring."
+        ),
+        _ => String::new(),
+    };
+
     let summary = format!(
         "Transfer {amount} tokens ({raw} base units)\n\
          From: {sender} (source ATA {source_ata})\n\
          To:   {recipient} (dest ATA {dest_ata}{created})\n\
          Mint: {mint}{prog}\n\
          Memo: {memo}\n\
-         Requires signature from: {sender}",
+         Requires signature from: {sender}{approval_note}",
         amount = args.amount,
         raw = raw_amount,
         created = if dest_exists { "" } else { ", will be created" },
@@ -259,6 +361,8 @@ pub fn build_transfer(
         source_ata: source_ata.to_base58(),
         destination_ata: dest_ata.to_base58(),
         destination_ata_will_be_created: !dest_exists,
+        status: status.to_string(),
+        policy_verdict,
     })
 }
 

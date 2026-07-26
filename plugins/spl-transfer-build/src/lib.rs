@@ -80,7 +80,12 @@ mod component {
         }
 
         fn policy(&self) -> Result<TransferPolicy, CoreError> {
-            TransferPolicy::from_config(self.config.get("allowed_recipients").map(String::as_str))
+            TransferPolicy::from_config(
+                self.config.get("allowed_recipients").map(String::as_str),
+                self.config
+                    .get("max_auto_approve_base_units")
+                    .map(String::as_str),
+            )
         }
     }
 
@@ -142,8 +147,9 @@ mod component {
                 Some(PluginOutcome::Success),
                 "built unsigned SPL transfer",
                 Some(format!(
-                    "{{\"destination_ata_will_be_created\":{}}}",
-                    result.destination_ata_will_be_created
+                    "{{\"destination_ata_will_be_created\":{},\"status\":{}}}",
+                    result.destination_ata_will_be_created,
+                    json_string(&result.status)
                 )),
             );
 
