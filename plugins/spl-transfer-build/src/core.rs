@@ -226,7 +226,7 @@ pub struct TransferResult {
     pub source_ata: String,
     pub destination_ata: String,
     pub destination_ata_will_be_created: bool,
-    /// `"auto_approved"` or `"requires_approval"` — mirrors `policy_verdict` 
+    /// `"auto_approved"` or `"requires_approval"` — mirrors `policy_verdict`
     /// as a plain string so callers that only look at `status` (e.g. a log
     /// filter) don't need to parse the nested verdict shape.
     pub status: String,
