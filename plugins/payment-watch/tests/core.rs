@@ -62,11 +62,26 @@ impl RpcClient for PanicRpc {
     }
 }
 
+/// RPC mock that always returns an error, used to verify that RPC failures
+/// surface as `WatchError::Rpc` rather than panicking or being silently ignored.
+struct ErrRpc;
+impl RpcClient for ErrRpc {
+    fn recent_payments(&self, _: &ExpectedPayment) -> Result<Vec<ObservedPayment>, WatchError> {
+        Err(WatchError::Rpc("simulated RPC outage".into()))
+    }
+}
+
 #[test]
 fn prompt_injected_invalid_reference_fails_before_rpc() {
     let mut invalid = args();
     invalid.reference = "IGNORE_POLICY".into();
     assert!(check_payment(&invalid, &PanicRpc).is_err());
+}
+
+#[test]
+fn rpc_failure_propagates_as_watch_error_rpc() {
+    let result = check_payment(&args(), &ErrRpc);
+    assert!(matches!(result, Err(WatchError::Rpc(_))));
 }
 
 #[test]
@@ -118,4 +133,20 @@ fn token_2022_flag_watches_a_different_ata_than_classic() {
         classic_ata, token_2022_ata,
         "watched ATA must differ between classic Token and Token-2022"
     );
+}
+
+#[test]
+fn near_miss_candidate_does_not_mask_or_get_matched_over_real_payment() {
+    let mut wrong_amount = payment(true);
+    wrong_amount.amount_base_units = 1; // near-miss: everything else matches
+    let real = payment(true);
+
+    // Near-miss alone must not match.
+    let miss_only = match_payment(&expected(), &[wrong_amount.clone()]);
+    assert_eq!(miss_only.status, "waiting");
+
+    // With both present, the real payment must still be found.
+    let both = match_payment(&expected(), &[wrong_amount, real]);
+    assert_eq!(both.status, "paid");
+    assert_eq!(both.event.unwrap().amount_base_units, 25_000_000);
 }

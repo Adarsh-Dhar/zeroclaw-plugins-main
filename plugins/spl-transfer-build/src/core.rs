@@ -179,6 +179,10 @@ pub fn build_transfer(
         TOKEN_PROGRAM_ID
     })?;
 
+    if sender == recipient {
+        return Err(CoreError::InvalidInput("sender and recipient must differ".into()));
+    }
+
     if args.token_2022 {
         let (mint_data, owner) = rpc.get_account_data(&mint)?;
         let token_2022_program = Pubkey::parse(TOKEN_2022_PROGRAM_ID)?;

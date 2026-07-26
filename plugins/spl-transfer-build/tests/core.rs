@@ -49,6 +49,22 @@ impl RpcClient for PanicRpc {
     }
 }
 
+/// RPC mock that always returns an error, used to verify that RPC failures
+/// surface as `CoreError::Rpc` rather than panicking or being silently ignored.
+struct ErrRpc;
+
+impl RpcClient for ErrRpc {
+    fn get_latest_blockhash(&self) -> Result<[u8; 32], CoreError> {
+        Err(CoreError::Rpc("simulated RPC outage".into()))
+    }
+    fn account_exists(&self, _pubkey: &Pubkey) -> Result<bool, CoreError> {
+        Ok(false)
+    }
+    fn get_account_data(&self, _pubkey: &Pubkey) -> Result<(Vec<u8>, Pubkey), CoreError> {
+        Err(CoreError::Rpc("simulated RPC outage".into()))
+    }
+}
+
 // Well-formed base58 pubkeys (arbitrary but valid 32-byte encodings)
 // used across tests below.
 const SENDER: &str = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
@@ -415,4 +431,48 @@ fn no_nonce_account_unchanged_behavior() {
 
     // Should use regular blockhash and build successfully
     assert!(result.transaction_base64.len() > 0);
+}
+
+#[test]
+fn rpc_failure_surfaces_as_core_error_rpc_not_a_panic() {
+    let result = build_transfer(&base_args(), &ErrRpc, &policy());
+    assert!(matches!(result, Err(CoreError::Rpc(_))));
+}
+
+#[test]
+fn rejects_unknown_fields_on_transfer_args() {
+    let json = r#"{
+        "sender": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+        "recipient": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "amount": "25.0",
+        "decimals": 6,
+        "memo": null,
+        "nonce_account": null,
+        "unexpected_field": "attacker-controlled"
+    }"#;
+    let result: Result<TransferArgs, _> = serde_json::from_str(json);
+    assert!(result.is_err(), "unknown field must be rejected, not silently dropped");
+}
+
+// Note: ExecuteArgs (lib.rs) lives inside #[cfg(target_family = "wasm")],
+// so it cannot be exercised by native `cargo test`. Parity is currently
+// enforced only by review (ExecuteArgs mirrors TransferArgs field-for-field
+// and shares the same deny_unknown_fields attribute). If real coverage is
+// wanted, run `cargo test --target wasm32-wasip2` with a small wasm-side
+// harness, or factor ExecuteArgs's deserialization into a non-wasm-gated
+// helper that both the component and a native test can call.
+
+#[test]
+fn self_transfer_is_rejected() {
+    let rpc = MockRpc {
+        blockhash: [5u8; 32],
+        dest_exists: false,
+        nonce_data: None,
+        mint_data: None,
+    };
+    let mut args = base_args();
+    args.sender = RECIPIENT.into(); // Same as recipient
+    let result = build_transfer(&args, &rpc, &policy());
+    assert!(matches!(result, Err(CoreError::InvalidInput(_))));
 }

@@ -28,6 +28,11 @@ fn creates_a_qr_ready_solana_pay_transfer_url() {
 
 #[test]
 fn rejects_invalid_or_zero_money_values() {
+    // Note: This plugin has no `decimals` field — it only emits a Solana Pay URL
+    // string, so no base-unit conversion happens. These tests validate string
+    // format (no scientific notation, no trailing spaces, etc.), not decimal-
+    // precision-vs-decimals validity like `spl-transfer-build`'s tests do.
+    // Different domain, so line-for-line parity is not applicable here.
     for amount in ["0", "0.000", "-25", "25.0.0", "25 ", "1e3"] {
         let mut args = request();
         args.amount = amount.into();
