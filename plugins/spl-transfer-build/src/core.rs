@@ -51,15 +51,14 @@ impl From<PubkeyError> for CoreError {
 }
 
 // solana_core_wasi::pubkey::Pubkey replaces the local type; parse errors are
-// mapped through `From<PubkeyError> for CoreError` above. `derive_ata` below
-// wraps the crate's version so call sites don't need a `token_program`
-// argument for the ATA-program constant, matching the old signature.
+// mapped through `From<PubkeyError> for CoreError` above.
 
-pub fn derive_ata(owner: &Pubkey, mint: &Pubkey, _token_program: &Pubkey) -> Result<Pubkey, CoreError> {
-    // solana_core_wasi::pubkey::derive_ata always derives against the classic
-    // token program; this plugin's Token-2022 support only affects the
-    // *transfer* instruction, not ATA derivation, so this is a drop-in swap.
-    Ok(core_derive_ata(owner, mint))
+pub fn derive_ata(owner: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Result<Pubkey, CoreError> {
+    // The ATA address depends on which program owns the mint: a Token-2022
+    // mint's associated token account is a different PDA than the classic
+    // Token derivation. token_program must reflect the caller's token_2022
+    // choice, not the classic program unconditionally.
+    Ok(core_derive_ata(owner, mint, token_program))
 }
 
 // Nonce helpers — `nonce_blockhash_from_data` and `ix_advance_nonce` — become thin wrappers
@@ -183,7 +182,13 @@ pub fn build_transfer(
     let raw_amount = to_base_units(&args.amount, args.decimals)
         .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
 
-    let mut instructions = vec![ata_create_idempotent(&sender, &dest_ata, &recipient, &mint)];
+    let mut instructions = vec![ata_create_idempotent(
+        &sender,
+        &dest_ata,
+        &recipient,
+        &mint,
+        &token_program,
+    )];
     instructions.push(spl_transfer_checked(
         &source_ata,
         &mint,
@@ -191,6 +196,7 @@ pub fn build_transfer(
         &sender,
         raw_amount,
         args.decimals,
+        &token_program,
     ));
     if let Some(memo) = &args.memo {
         instructions.push(memo_ix(memo));

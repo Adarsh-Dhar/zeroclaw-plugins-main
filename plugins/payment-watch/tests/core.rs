@@ -80,3 +80,42 @@ fn parameters_schema_is_valid_json_for_the_host() {
         Some("string")
     );
 }
+
+/// Regression test: `token_2022: true` must resolve to a different watched
+/// ATA than the classic-Token path for the same (recipient, mint). Before
+/// `derive_ata` threaded the token program through, this flag was silently
+/// dropped at the ATA-derivation step, so a real Token-2022 payment would
+/// never be observed (the plugin would watch the wrong account forever).
+#[test]
+fn token_2022_flag_watches_a_different_ata_than_classic() {
+    use payment_watch::core::derive_ata;
+
+    let mut classic = args();
+    classic.token_2022 = false;
+    let mut token_2022 = args();
+    token_2022.token_2022 = true;
+
+    let classic_expected = classic.expected().unwrap();
+    let token_2022_expected = token_2022.expected().unwrap();
+    assert_ne!(
+        classic_expected.token_program, token_2022_expected.token_program,
+        "token_2022 must select the Token-2022 program id"
+    );
+
+    let classic_ata = derive_ata(
+        classic_expected.recipient,
+        classic_expected.mint,
+        classic_expected.token_program,
+    )
+    .unwrap();
+    let token_2022_ata = derive_ata(
+        token_2022_expected.recipient,
+        token_2022_expected.mint,
+        token_2022_expected.token_program,
+    )
+    .unwrap();
+    assert_ne!(
+        classic_ata, token_2022_ata,
+        "watched ATA must differ between classic Token and Token-2022"
+    );
+}

@@ -99,11 +99,13 @@ pub fn find_program_address(seeds: &[&[u8]], program_id: &Pubkey) -> ([u8; 32], 
     unreachable!("no off-curve PDA found for any bump")
 }
 
-/// Derive the associated token account for (wallet, mint) under the classic
-/// token program.
-pub fn derive_ata(wallet: &Pubkey, mint: &Pubkey) -> Pubkey {
-    let tp = token_program();
-    let (addr, _) = find_program_address(&[&wallet.0, &tp.0, &mint.0], &ata_program());
+/// Derive the associated token account for (wallet, mint) under the given
+/// token program. Callers pick `token_program()` (classic SPL Token) or a
+/// Token-2022 program id depending on the mint; the ATA address differs
+/// between the two, so the caller's choice must be threaded through here
+/// rather than assumed.
+pub fn derive_ata(wallet: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Pubkey {
+    let (addr, _) = find_program_address(&[&wallet.0, &token_program.0, &mint.0], &ata_program());
     Pubkey(addr)
 }
 

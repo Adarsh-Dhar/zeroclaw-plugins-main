@@ -59,6 +59,10 @@ pub fn system_transfer(from: &Pubkey, to: &Pubkey, lamports: u64) -> Instruction
 
 /// spl-token TransferChecked — discriminant 12, u64 LE amount, u8 decimals.
 /// Metas: source ATA (w), mint (r), destination ATA (w), owner (s).
+///
+/// `token_program` selects classic SPL Token vs Token-2022; the caller must
+/// pass whichever program actually owns `mint`, since this instruction is
+/// rejected on-chain if sent to the wrong one.
 pub fn spl_transfer_checked(
     source_ata: &Pubkey,
     mint: &Pubkey,
@@ -66,12 +70,13 @@ pub fn spl_transfer_checked(
     owner: &Pubkey,
     amount: u64,
     decimals: u8,
+    token_program: &Pubkey,
 ) -> Instruction {
     let mut data = vec![12u8];
     data.extend_from_slice(&amount.to_le_bytes());
     data.push(decimals);
     Instruction {
-        program_id: token_program(),
+        program_id: *token_program,
         accounts: vec![
             AccountMeta::writable(*source_ata, false),
             AccountMeta::readonly(*mint, false),
@@ -85,11 +90,15 @@ pub fn spl_transfer_checked(
 /// ATA CreateIdempotent — discriminant [1]. Creates the destination ATA when
 /// missing; a no-op when it already exists.
 /// Metas: payer (w,s), ata (w), wallet (r), mint (r), system (r), token (r).
+///
+/// `token_program` must match whichever program owns `mint` (classic SPL
+/// Token or Token-2022) and whichever program `ata` was derived against.
 pub fn ata_create_idempotent(
     payer: &Pubkey,
     ata: &Pubkey,
     wallet: &Pubkey,
     mint: &Pubkey,
+    token_program: &Pubkey,
 ) -> Instruction {
     Instruction {
         program_id: ata_program(),
@@ -99,7 +108,7 @@ pub fn ata_create_idempotent(
             AccountMeta::readonly(*wallet, false),
             AccountMeta::readonly(*mint, false),
             AccountMeta::readonly(SYSTEM_PROGRAM, false),
-            AccountMeta::readonly(token_program(), false),
+            AccountMeta::readonly(*token_program, false),
         ],
         data: vec![1u8],
     }
@@ -202,6 +211,7 @@ mod tests {
             &Pubkey([4; 32]),
             25_000_000,
             6,
+            &token_program(),
         );
         assert_eq!(ix.data[0], 12);
         assert_eq!(
@@ -211,6 +221,23 @@ mod tests {
         assert_eq!(ix.data[9], 6);
         assert_eq!(ix.accounts.len(), 4);
         assert!(ix.accounts[3].is_signer, "owner signs");
+    }
+
+    #[test]
+    fn transfer_checked_targets_the_given_token_program() {
+        // A Token-2022 transfer must be sent to Token-2022, not classic
+        // Token — this is the bug this parameter exists to prevent.
+        let token_2022 = Pubkey([9; 32]);
+        let ix = spl_transfer_checked(
+            &Pubkey([1; 32]),
+            &Pubkey([2; 32]),
+            &Pubkey([3; 32]),
+            &Pubkey([4; 32]),
+            1,
+            0,
+            &token_2022,
+        );
+        assert_eq!(ix.program_id, token_2022);
     }
 
     #[test]
@@ -229,9 +256,24 @@ mod tests {
             &Pubkey([2; 32]),
             &Pubkey([3; 32]),
             &Pubkey([4; 32]),
+            &token_program(),
         );
         assert_eq!(ix.data, vec![1]);
         assert_eq!(ix.accounts.len(), 6);
+        assert_eq!(ix.accounts[5].pubkey, token_program());
+    }
+
+    #[test]
+    fn create_idempotent_honors_the_given_token_program() {
+        let token_2022 = Pubkey([9; 32]);
+        let ix = ata_create_idempotent(
+            &Pubkey([1; 32]),
+            &Pubkey([2; 32]),
+            &Pubkey([3; 32]),
+            &Pubkey([4; 32]),
+            &token_2022,
+        );
+        assert_eq!(ix.accounts[5].pubkey, token_2022);
     }
 
     #[test]

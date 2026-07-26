@@ -46,8 +46,12 @@ impl From<PubkeyError> for WatchError {
     }
 }
 
-pub fn derive_ata(owner: Pubkey, mint: Pubkey, _token_program: Pubkey) -> Result<Pubkey, WatchError> {
-    Ok(core_derive_ata(&owner, &mint))
+pub fn derive_ata(owner: Pubkey, mint: Pubkey, token_program: Pubkey) -> Result<Pubkey, WatchError> {
+    // The ATA to watch depends on which program owns the mint: a
+    // Token-2022 mint's associated token account is a different PDA than
+    // the classic Token derivation. Passing the wrong program here means
+    // watching an account nobody ever pays into.
+    Ok(core_derive_ata(&owner, &mint, &token_program))
 }
 
 #[derive(Debug, Clone, Deserialize)]

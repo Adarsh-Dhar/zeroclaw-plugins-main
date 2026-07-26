@@ -210,3 +210,36 @@ fn rejects_oversized_memo() {
     args.memo = Some("x".repeat(MAX_MEMO_LEN + 1));
     assert!(build_transfer(&args, &rpc, &policy()).is_err());
 }
+
+/// Regression test: `token_2022: true` must actually change which program
+/// the transfer targets. Before this was wired through, the flag only
+/// changed the human-readable summary text — the built transaction always
+/// targeted classic SPL Token regardless, which fails on-chain for a real
+/// Token-2022 mint.
+#[test]
+fn token_2022_flag_changes_atas_and_targets_token_2022() {
+    let rpc = MockRpc {
+        blockhash: [5u8; 32],
+        dest_exists: false,
+    };
+    let mut classic = base_args();
+    classic.token_2022 = false;
+    let mut token_2022 = base_args();
+    token_2022.token_2022 = true;
+
+    let classic_result = build_transfer(&classic, &rpc, &policy()).expect("builds");
+    let token_2022_result = build_transfer(&token_2022, &rpc, &policy()).expect("builds");
+
+    // Token-2022 ATAs are a different PDA than the classic derivation for
+    // the same (owner, mint) pair, since the owning program is part of the
+    // seed. If these ever match, the token_program is being ignored again.
+    assert_ne!(
+        classic_result.source_ata, token_2022_result.source_ata,
+        "token_2022 must derive a different source ATA than classic Token"
+    );
+    assert_ne!(
+        classic_result.destination_ata, token_2022_result.destination_ata,
+        "token_2022 must derive a different destination ATA than classic Token"
+    );
+    assert!(token_2022_result.summary.contains("Token-2022"));
+}
