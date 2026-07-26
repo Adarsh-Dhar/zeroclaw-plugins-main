@@ -1,7 +1,7 @@
 name = "payment-watch"
 version = "0.1.0"
 description = "Check Solana for a referenced SPL-token payment and return a structured settlement event."
-author = "Adarsh"
+author = "Adarsh-Dhar"
 wasm_path = "payment_watch.wasm"
 capabilities = ["tool"]
 permissions = ["http_client", "config_read"]

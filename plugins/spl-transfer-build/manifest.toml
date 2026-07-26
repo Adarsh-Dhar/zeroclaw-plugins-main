@@ -1,7 +1,7 @@
 name = "spl-transfer-build"
 version = "0.1.0"
 description = "Build an unsigned SPL token transfer transaction for a separately approved wallet workflow."
-author = "Adarsh"
+author = "Adarsh-Dhar"
 # The plugin installer accepts a package-root-relative artifact name. The
 # release build is copied here by the documented build command.
 wasm_path = "spl_transfer_build.wasm"

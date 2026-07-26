@@ -61,7 +61,3 @@ cargo build --locked --target wasm32-wasip2 --release
 cargo clippy --target wasm32-wasip2 -- -D warnings
 cp target/wasm32-wasip2/release/payment_watch.wasm payment_watch.wasm
 ```
-
-## License
-
-MIT

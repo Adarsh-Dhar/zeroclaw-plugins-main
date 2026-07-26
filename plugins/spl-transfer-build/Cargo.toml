@@ -2,7 +2,7 @@
 name = "spl-transfer-build"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "ZeroClaw tool plugin: builds an unsigned SPL token transfer transaction (T1, no custody)."
 publish = false
 
@@ -26,9 +26,10 @@ solana-core-wasi = { path = "../../libs/solana-core" }
 waki = { version = "0.5.1", features = ["json"] }
 
 [profile.release]
-opt-level = "z"
+opt-level = "s"
 lto = true
 strip = true
+codegen-units = 1
 
 # Keep this plugin independently buildable when checked out beneath the
 # ZeroClaw plugins repository.

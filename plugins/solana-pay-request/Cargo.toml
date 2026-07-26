@@ -2,7 +2,7 @@
 name = "solana-pay-request"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "ZeroClaw T1 tool plugin that creates unsigned Solana Pay transfer URLs."
 publish = false
 
@@ -19,8 +19,9 @@ wit-bindgen = "0.46"
 solana-core-wasi = { path = "../../libs/solana-core" }
 
 [profile.release]
-opt-level = "z"
+opt-level = "s"
 lto = true
 strip = true
+codegen-units = 1
 
 [workspace]

@@ -49,7 +49,3 @@ cp target/wasm32-wasip2/release/solana_pay_request.wasm solana_pay_request.wasm
 
 The chat/channel layer should render `qr_payload` as a QR image. A payment
 watch SOP can use the returned reference key to report settlement.
-
-## License
-
-MIT

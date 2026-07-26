@@ -2,7 +2,7 @@
 name = "payment-watch"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 description = "ZeroClaw T0 tool plugin that checks Solana payments by amount and reference."
 publish = false
 
@@ -22,8 +22,9 @@ solana-core-wasi = { path = "../../libs/solana-core" }
 waki = { version = "0.5.1", features = ["json"] }
 
 [profile.release]
-opt-level = "z"
+opt-level = "s"
 lto = true
 strip = true
+codegen-units = 1
 
 [workspace]

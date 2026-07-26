@@ -176,7 +176,3 @@ root, which is the package-relative path declared in `manifest.toml`.
   instructions plus `waki`/`wasi:http` only in the host shim. This was the
   main implementation friction, and it keeps native tests fast and the Wasm
   capability surface minimal.
-
-## License
-
-[MIT](LICENSE)
