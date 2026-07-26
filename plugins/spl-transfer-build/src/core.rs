@@ -42,6 +42,8 @@ pub enum CoreError {
     Rpc(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    #[error("unsafe mint extension: {0}")]
+    UnsafeMintExtension(String),
 }
 
 impl From<PubkeyError> for CoreError {
@@ -85,6 +87,7 @@ pub fn ix_advance_nonce(
 pub trait RpcClient {
     fn get_latest_blockhash(&self) -> Result<[u8; 32], CoreError>;
     fn account_exists(&self, pubkey: &Pubkey) -> Result<bool, CoreError>;
+    fn get_account_data(&self, pubkey: &Pubkey) -> Result<(Vec<u8>, Pubkey), CoreError>;
 }
 
 // ---------------------------------------------------------------------
@@ -105,6 +108,7 @@ pub struct TransferArgs {
     pub memo: Option<String>,
     #[serde(default)]
     pub token_2022: bool,
+    pub nonce_account: Option<String>,
 }
 
 /// Operator-controlled destination policy. An empty allowlist intentionally
@@ -175,6 +179,21 @@ pub fn build_transfer(
         TOKEN_PROGRAM_ID
     })?;
 
+    if args.token_2022 {
+        let (mint_data, owner) = rpc.get_account_data(&mint)?;
+        let token_2022_program = Pubkey::parse(TOKEN_2022_PROGRAM_ID)?;
+        if owner != token_2022_program {
+            return Err(CoreError::InvalidInput(
+                "token_2022=true but mint is not owned by Token-2022 program".into(),
+            ));
+        }
+        let extensions = solana_core_wasi::token2022::parse_mint_extensions(&mint_data)
+            .map_err(|e| CoreError::InvalidInput(format!("{e:?}")))?;
+        if let Err(name) = solana_core_wasi::token2022::check_extensions_safe(&extensions) {
+            return Err(CoreError::UnsafeMintExtension(name));
+        }
+    }
+
     let source_ata = derive_ata(&sender, &mint, &token_program)?;
     let dest_ata = derive_ata(&recipient, &mint, &token_program)?;
     let dest_exists = rpc.account_exists(&dest_ata)?;
@@ -202,8 +221,18 @@ pub fn build_transfer(
         instructions.push(memo_ix(memo));
     }
 
-    let blockhash = rpc.get_latest_blockhash()?;
-    let message = compile_legacy(&sender, &instructions, &blockhash);
+    let recent_blockhash = if let Some(nonce_acct) = &args.nonce_account {
+        let nonce_pubkey = Pubkey::parse(nonce_acct)
+            .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
+        let (data, _owner) = rpc.get_account_data(&nonce_pubkey)?;
+        let state = solana_core_wasi::nonce::parse_nonce_account(&data)
+            .map_err(|e| CoreError::InvalidInput(e.to_string()))?;
+        instructions.insert(0, solana_core_wasi::instruction::advance_nonce(&nonce_pubkey, &sender));
+        state.durable_nonce
+    } else {
+        rpc.get_latest_blockhash()?
+    };
+    let message = compile_legacy(&sender, &instructions, &recent_blockhash);
     let transaction_base64 = unsigned_transaction_base64(&message);
 
     let summary = format!(
@@ -239,7 +268,8 @@ pub const PARAMETERS_SCHEMA: &str = r#"{
     "amount": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$", "description": "Exact positive human-readable decimal amount, e.g. \"25.0\". Must not have more fractional digits than decimals." },
     "decimals": { "type": "integer", "minimum": 0, "maximum": 255, "description": "Mint decimals" },
     "memo": { "type": "string", "maxLength": 500, "description": "Optional invoice/reconciliation memo" },
-    "token_2022": { "type": "boolean", "default": false }
+    "token_2022": { "type": "boolean", "default": false },
+    "nonce_account": { "type": "string", "description": "Optional durable-nonce account; when set, the transaction stays valid until this nonce advances instead of expiring with a recent blockhash." }
   },
   "required": ["sender", "recipient", "mint", "amount", "decimals"]
 }"#;

@@ -51,6 +51,8 @@ mod component {
         memo: Option<String>,
         #[serde(default)]
         token_2022: bool,
+        #[serde(default)]
+        nonce_account: Option<String>,
         #[serde(rename = "__config", default)]
         config: HashMap<String, String>,
     }
@@ -65,6 +67,7 @@ mod component {
                 decimals: self.decimals,
                 memo: self.memo.clone(),
                 token_2022: self.token_2022,
+                nonce_account: self.nonce_account.clone(),
             }
         }
 
@@ -254,6 +257,16 @@ mod component {
                 .pointer("/result/value")
                 .map(|account| !account.is_null())
                 .ok_or_else(|| CoreError::Rpc("missing account value in RPC response".to_string()))
+        }
+
+        fn get_account_data(&self, pubkey: &Pubkey) -> Result<(Vec<u8>, Pubkey), CoreError> {
+            let raw = self.call(
+                "getAccountInfo",
+                serde_json::json!([pubkey.to_base58(), {"encoding": "base64"}]),
+            )?;
+            solana_core_wasi::rpc::parse_account_info(
+                &raw.to_string()
+            ).map_err(|e| CoreError::Rpc(e.to_string()))
         }
     }
 

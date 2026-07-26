@@ -35,3 +35,4 @@ pub mod pay;
 pub mod policy;
 pub mod pubkey;
 pub mod rpc;
+pub mod token2022;
