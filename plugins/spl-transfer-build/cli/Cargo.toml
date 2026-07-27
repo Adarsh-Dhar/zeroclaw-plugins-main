@@ -1,0 +1,17 @@
+[package]
+name = "spl-transfer-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "spl-transfer-cli"
+path = "src/main.rs"
+
+[dependencies]
+spl-transfer-build = { path = ".." }
+solana-core-wasi = { path = "../../../libs/solana-core" }
+serde_json = "1"
+bs58 = "0.5"
+ureq = { version = "2", features = ["json"] }
+
+[workspace]
